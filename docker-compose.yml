@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  couchdb:
+    image: couchdb:latest
+    container_name: couchdb
+    env_file:
+     - .env
+    ports:
+      - "5984:5984"
+    environment:
+      - COUCHDB_USER=${COUCHDB_USER}
+      - COUCHDB_PASSWORD=${COUCHDB_PASSWORD}
+    volumes:
+      - ./data:/opt/couchdb/data
+    restart: unless-stopped
