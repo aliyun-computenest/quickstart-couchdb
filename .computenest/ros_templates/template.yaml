@@ -14,6 +14,10 @@ Conditions:
     Fn::Equals:
       - NewVPC
       - Ref: VpcOption
+  EnablePublicIpConditions:
+    Fn::Equals:
+      - true
+      - Ref: EnablePublicIp
 Parameters:
   VpcOption:
     Type: String
@@ -175,6 +179,12 @@ Parameters:
     MinLength: 8
     MaxLength: 30
     AssociationProperty: ALIYUN::ECS::Instance::Password
+  EnablePublicIp:
+    Type: Boolean
+    Label:
+      en: Whether Enable Public IP
+      zh-cn: 是否开启公网IP
+    Default: true
   ZoneId:
     Type: String
     Label:
@@ -219,7 +229,7 @@ Parameters:
           Fn::Equals:
             - ExistingVPC
             - ${VpcOption}
-  COUCHDB_USERNAME:
+  COUCHDB_USER:
     Type: String
     AllowedPattern: '^[a-zA-Z0-9-\(\)\`\~\!\@\#\$\%\^\&\*\_\-\+\=\|\{\}\[\]\:\;\<\>\,\.\?\/]*$'
     Label:
@@ -316,7 +326,12 @@ Resources:
       DiskMappings:
         - Category: cloud_essd
           Size: 200
-      InternetMaxBandwidthOut: 5
+          Device: /dev/xvdb
+      InternetMaxBandwidthOut:
+        Fn::If:
+          - EnablePublicIpConditions
+          - 5
+          - 0
       IoOptimized: optimized
       MaxAmount: 1
   RunInstallCommand:
@@ -329,30 +344,97 @@ Resources:
       Type: RunShellScript
       Sync: true
       Timeout: 3600
-      CommandContent: |-
-        cd /root/quickstart-couchdb
-        docker compose down
+      CommandContent:
+        Fn::Sub:
+          - |
+            #!/bin/bash
+            disk_device="/dev/vdb"
+            parted_disk_device="/dev/vdb1"
+            mount_point="/mnt/data"
+            # 已初始化的磁盘，跳过初始化，直接挂载
+            if blkid -o value -s TYPE $disk_device &>/dev/null; then
+              echo "Disk is already initialized."
+            else
+              echo "Disk is not initialized, initializing..."
+              cat >> /root/InitDataDisk.sh << "EOF"
+              #!/bin/bash
+              echo "p
+              n
+              p
 
-        ENV_FILE=".env"
-        sed -i "s/^COUCHDB_USERNAME=.*/COUCHDB_USERNAME=${COUCHDB_USERNAME}/" $ENV_FILE
-        sed -i "s/^COUCHDB_PASSWORD=.*/COUCHDB_PASSWORD=${COUCHDB_PASSWORD}/" $ENV_FILE
 
-        docker compose up -d
 
+              w
+              " |  fdisk -u /dev/vdb
+            EOF
+              /bin/bash /root/InitDataDisk.sh
+              rm -f /root/InitDataDisk.sh
+              mkfs -t ext4 $parted_disk_device
+            fi
+
+            cp /etc/fstab /etc/fstab.bak
+            mkdir $mount_point
+            echo `blkid $parted_disk_device | awk '{print $2}' | sed 's/\\\"//g'` $mount_point ext4 defaults 0 0 >> /etc/fstab
+            mount -a
+
+            cd /root/quickstart-couchdb
+            docker compose down
+
+            ENV_FILE="/root/quickstart-couchdb/.env"
+            sed -i "s/^COUCHDB_USER *=.*/COUCHDB_USER=${COUCHDB_USER}/" $ENV_FILE
+            sed -i "s/^COUCHDB_PASSWORD *=.*/COUCHDB_PASSWORD=${COUCHDB_PASSWORD}/" $ENV_FILE
+
+            COMPOSE_FILE="/root/quickstart-couchdb/docker-compose.yml"
+            sed -i -E 's|\./data|/mnt/data|g' "$COMPOSE_FILE"
+            chmod -R 777 /mnt/data/
+
+            docker compose up -d
+
+          - COUCHDB_USER:
+              Ref: COUCHDB_USER
+            COUCHDB_PASSWORD:
+              Ref: COUCHDB_PASSWORD
 Outputs:
-  CouchDB:
+  CouchDB Addresses:
     Description:
-      zh-cn: CouchDB应用入口
+      zh-cn: CouchDB 地址
       en: CouchDB Addresses
     Value:
       Fn::Sub:
         - 'http://${ServerAddress}:5984'
         - ServerAddress:
-            Fn::Select:
-            - 0
-            - Fn::GetAtt:
-              - InstanceGroup
-              - PublicIps
+            Fn::If:
+              - EnablePublicIpConditions
+              - Fn::Select:
+                - 0
+                - Fn::GetAtt:
+                  - InstanceGroup
+                  - PublicIps
+              - Fn::Select:
+                - 0
+                - Fn::GetAtt:
+                  - InstanceGroup
+                  - PrivateIps
+  CouchDB Utils Addresses:
+    Description:
+      zh-cn: CouchDB Utils 地址
+      en: CouchDB Utils Addresses
+    Value:
+      Fn::Sub:
+        - 'http://${ServerAddress}:5984/_utils'
+        - ServerAddress:
+            Fn::If:
+              - EnablePublicIpConditions
+              - Fn::Select:
+                - 0
+                - Fn::GetAtt:
+                  - InstanceGroup
+                  - PublicIps
+              - Fn::Select:
+                - 0
+                - Fn::GetAtt:
+                  - InstanceGroup
+                  - PrivateIps
 Metadata:
   ALIYUN::ROS::Interface:
     ParameterGroups:
@@ -365,10 +447,11 @@ Metadata:
       - Parameters:
           - EcsInstanceType
           - InstancePassword
+          - EnablePublicIp
         Label:
           default: 资源配置
       - Parameters:
-          - COUCHDB_USERNAME
+          - COUCHDB_USER
           - COUCHDB_PASSWORD
         Label:
           default: 数据库配置
