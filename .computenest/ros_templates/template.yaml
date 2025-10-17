@@ -435,6 +435,34 @@ Outputs:
                 - Fn::GetAtt:
                   - InstanceGroup
                   - PrivateIps
+  CouchDB Private Addresses:
+    Condition: EnablePublicIpConditions
+    Description:
+      zh-cn: CouchDB 内网地址
+      en: CouchDB Addresses
+    Value:
+      Fn::Sub:
+        - 'http://${ServerAddress}:5984'
+        - ServerAddress:
+            Fn::Select:
+              - 0
+              - Fn::GetAtt:
+                  - InstanceGroup
+                  - PrivateIps
+  CouchDB Utils Private Addresses:
+    Condition: EnablePublicIpConditions
+    Description:
+      zh-cn: CouchDB Utils 内网地址
+      en: CouchDB Utils Private Addresses
+    Value:
+      Fn::Sub:
+        - 'http://${ServerAddress}:5984/_utils'
+        - ServerAddress:
+            Fn::Select:
+              - 0
+              - Fn::GetAtt:
+                  - InstanceGroup
+                  - PrivateIps
 Metadata:
   ALIYUN::ROS::Interface:
     ParameterGroups:
